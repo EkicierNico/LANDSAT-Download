@@ -4,7 +4,8 @@
 """
     Landsat Data download from earth explorer
 """
-import os,sys,math,urllib2,urllib,time,math,shutil
+
+import os, sys, math, urllib.request, urllib.parse, time, math, shutil
 import subprocess
 import optparse
 import datetime
@@ -13,45 +14,45 @@ import re
 
 ###########################################################################
 class OptionParser (optparse.OptionParser):
- 
     def check_required (self, opt):
-      option = self.get_option(opt)
- 
-      # Assumes the option's 'default' is set to None!
-      if getattr(self.values, option.dest) is None:
-          self.error("%s option not supplied" % option)
+        option = self.get_option(opt)
+
+        # Assumes the option's 'default' is set to None!
+        if getattr(self.values, option.dest) is None:
+            self.error("%s option not supplied" % option)
  
 #############################"Connection to Earth explorer with proxy
  
 def connect_earthexplorer_proxy(proxy_info,usgs):
-    print "Establishing connection to Earthexplorer with proxy..."    
+    print ("Establishing connection to Earthexplorer with proxy...")
     # contruction d'un "opener" qui utilise une connexion proxy avec autorisation
-    cookies = urllib2.HTTPCookieProcessor()
-    proxy_support = urllib2.ProxyHandler({"http" : "http://%(user)s:%(pass)s@%(host)s:%(port)s" % proxy_info,
-    "https" : "http://%(user)s:%(pass)s@%(host)s:%(port)s" % proxy_info})
-    opener = urllib2.build_opener(proxy_support, cookies)
+    cookies = urllib.request.HTTPCookieProcessor()
+    proxy_support = urllib.reProxyHandler({"http" : "http://%(user)s:%(pass)s@%(host)s:%(port)s" % proxy_info,
+                                          "https" : "http://%(user)s:%(pass)s@%(host)s:%(port)s" % proxy_info})
+    opener = urllib.request.build_opener(proxy_support, cookies)
  
     # installation
-    urllib2.install_opener(opener)
+    urllib.request.install_opener(opener)
     # deal with csrftoken required by USGS as of 7-20-2016
-    data=urllib2.urlopen("https://ers.cr.usgs.gov").read()
+    data=urllib.request.urlopen("https://ers.cr.usgs.gov").read()
     m = re.search(r'<input .*?name="csrf_token".*?value="(.*?)"', data)
     if m:
         token = m.group(1)
     else :
-        print "Error : CSRF_Token not found"
+        print ("Error : CSRF_Token not found")
         sys.exit(-3)
     # parametres de connection
-    params = urllib.urlencode(dict(username=usgs['account'], password=usgs['passwd'], csrf_token=token))
+    params = urllib.parse.urlencode(dict(username=usgs['account'], password=usgs['passwd'], csrf_token=token)).encode('utf-8')
     # utilisation
 
-    request = urllib2.Request("https://ers.cr.usgs.gov", params, headers={})
-    f = urllib2.urlopen(request)
+    request = urllib.request.Request("https://ers.cr.usgs.gov", params, headers={})
+    f = urllib.request.urlopen(request)
+
     data = f.read()
     f.close()
-
-    if data.find('You must sign in as a registered user to download data or place orders for USGS EROS products')>0 :        
-        print "Authentification failed"
+    datat = str(data)
+    if datat.find('You must sign in as a registered user to download data or place orders for USGS EROS products')>0 :
+        print ("Authentification failed")
         sys.exit(-1)
     return
  
@@ -60,26 +61,27 @@ def connect_earthexplorer_proxy(proxy_info,usgs):
  
 def connect_earthexplorer_no_proxy(usgs):
     # mkmitchel (https://github.com/mkmitchell) solved the token issue
-    cookies = urllib2.HTTPCookieProcessor()
-    opener = urllib2.build_opener(cookies)
-    urllib2.install_opener(opener)
+    cookies = urllib.request.HTTPCookieProcessor()
+    opener = urllib.request.build_opener(cookies)
+    urllib.request.install_opener(opener)
     
-    data=urllib2.urlopen("https://ers.cr.usgs.gov").read()
-    m = re.search(r'<input .*?name="csrf_token".*?value="(.*?)"', data)
+    data=urllib.request.urlopen("https://ers.cr.usgs.gov").read()
+    m = re.search(r'<input .*?name="csrf_token".*?value="(.*?)"', data.decode('utf-8'))
     if m:
         token = m.group(1)
     else :
-        print "Error : CSRF_Token not found"
+        print ("Error : CSRF_Token not found")
         sys.exit(-3)
         
-    params = urllib.urlencode(dict(username=usgs['account'],password= usgs['passwd'], csrf_token=token))
-    request = urllib2.Request("https://ers.cr.usgs.gov/login", params, headers={})
-    f = urllib2.urlopen(request)
+    params = urllib.parse.urlencode(dict(username=usgs['account'],password= usgs['passwd'], csrf_token=token)).encode('utf-8')
+    request = urllib.request.Request("https://ers.cr.usgs.gov/login", params, headers={})
+    f = urllib.request.urlopen(request)
 
     data = f.read()
     f.close()
-    if data.find('You must sign in as a registered user to download data or place orders for USGS EROS products')>0 :
-        print "Authentification failed"
+    datat = str(data)
+    if datat.find('You must sign in as a registered user to download data or place orders for USGS EROS products') > 0:
+        print ("Authentification failed")
         sys.exit(-1)
     return
 
@@ -91,62 +93,71 @@ def sizeof_fmt(num):
             return "%3.1f %s" % (num, x)
         num /= 1024.0 
 #############################
-def downloadChunks(url,rep,nom_fic):
-  """ Downloads large files in pieces
-   inspired by http://josh.gourneau.com
-  """ 
-  try:
-    req = urllib2.urlopen(url)
-    #if downloaded file is html
-    if (req.info().gettype()=='text/html'):
-      print "error : file is in html and not an expected binary file"
-      lines=req.read()
-      if lines.find('Download Not Found')>0 :
-            raise TypeError
-      else:
-	  with open("error_output.html","w") as f:
-              f.write(lines)
-              print "result saved in ./error_output.html"
-              sys.exit(-1)
-    #if file too small           
-    total_size = int(req.info().getheader('Content-Length').strip())
-    if (total_size<50000):
-       print "Error: The file is too small to be a Landsat Image"
-       print url
-       sys.exit(-1)
-    print nom_fic,total_size
-    total_size_fmt = sizeof_fmt(total_size)
 
-    #download
-    downloaded = 0
-    CHUNK = 1024 * 1024 *8
-    with open(rep+'/'+nom_fic, 'wb') as fp:
-        start = time.clock()
-        print('Downloading {0} ({1}):'.format(nom_fic, total_size_fmt))
-	while True:
-	     chunk = req.read(CHUNK)
-	     downloaded += len(chunk)
-	     done = int(50 * downloaded / total_size)
-	     sys.stdout.write('\r[{1}{2}]{0:3.0f}% {3}ps'
-                             .format(math.floor((float(downloaded)
-                                                 / total_size) * 100),
-                                     '=' * done,
-                                     ' ' * (50 - done),
-                                     sizeof_fmt((downloaded // (time.clock() - start)) / 8)))
-	     sys.stdout.flush()
-	     if not chunk: break
-	     fp.write(chunk)
-  except urllib2.HTTPError, e:
-       if e.code == 500:
+def downloadChunks(url,rep,nom_fic):
+    '''
+    Downloads large files in pieces
+    inspired by http://josh.gourneau.com
+    '''
+    try:
+        req = urllib.request.urlopen(url)
+        #if downloaded file is html
+        if (req.info().get_content_type()=='text/html'):
+            print ("error : file is in html and not an expected binary file")
+            lines=req.read()
+
+            if lines.find('Download Not Found')>0 :
+                raise TypeError
+            else:
+                with open("error_output.html","w") as f:
+                    f.write(lines)
+                    print ("result saved in ./error_output.html")
+                    sys.exit(-1)
+
+        #if file too small
+        total_size = int(req.getheader('Content-Length').strip())
+
+        if (total_size<50000):
+            print ("Error: The file is too small to be a Landsat Image")
+            print (url)
+            sys.exit(-1)
+
+        print (nom_fic,total_size)
+        total_size_fmt = sizeof_fmt(total_size)
+
+        #download
+        downloaded = 0
+        CHUNK = 1024 * 1024 *8
+        with open(rep+'/'+nom_fic, 'wb') as fp:
+            start = time.time()
+            print('Downloading {0} ({1}):'.format(nom_fic, total_size_fmt))
+
+            while True:
+                chunk = req.read(CHUNK)
+                downloaded += len(chunk)
+                done = int(50 * downloaded / total_size)
+                sys.stdout.write('\r[{1}{2}]{0:3.0f}% {3}ps'
+                                 .format(math.floor((float(downloaded) / total_size) * 100),
+                                         '=' * done,
+                                         ' ' * (50 - done),
+                                         sizeof_fmt((downloaded // (time.time() - start)) / 8)))
+                sys.stdout.flush()
+
+                if not chunk:
+                    break
+                fp.write(chunk)
+
+    except urllib.error.HTTPError as e:
+        if e.code == 500:
             pass # File doesn't exist
-       else:
-            print "HTTP Error:", e.code , url
-       return False
-  except urllib2.URLError, e:
-    print "URL Error:",e.reason , url
-    return False
- 
-  return rep,nom_fic
+        else:
+            print ("HTTP Error:", e.code, url)
+        return False
+    except urllib.error.URLError as e:
+        print ("URL Error:", e.reason, url)
+        return False
+
+    return rep,nom_fic
 
 
 ##################
@@ -159,7 +170,7 @@ def cycle_day(path):
  
     cycle_day_path=math.fmod(nb_days_after_day1,16)
     if path>=98: #change date line
-	cycle_day_path+=1
+	    cycle_day_path+=1
     return(cycle_day_path)
 
 
@@ -186,7 +197,7 @@ def next_overpass(date1,path,sat):
 
 #############################"Get metadata files
 def getmetadatafiles(destdir,option):
-    print 'Verifying catalog metadata files...'
+    print ('Verifying catalog metadata files...')
     home = 'https://landsat.usgs.gov/landsat/metadata_service/bulk_metadata_files/'
     links=['LANDSAT_8.csv','LANDSAT_ETM.csv','LANDSAT_ETM_SLC_OFF.csv','LANDSAT_TM-1980-1989.csv','LANDSAT_TM-1990-1999.csv','LANDSAT_TM-2000-2009.csv','LANDSAT_TM-2010-2012.csv']
     for l in links:
@@ -194,17 +205,17 @@ def getmetadatafiles(destdir,option):
         url = home+l
         if option=='noupdate':
             if not os.path.exists(destfile):
-                print 'Downloading %s for the first time...'%(l)
-                urllib.urlretrieve (url, destfile)
+                print ('Downloading %s for the first time...'%(l))
+                urllib.request.urlretrieve(url, destfile)
         elif option=='update':	
-            urllib.urlretrieve (url, destfile)
+            urllib.request.urlretrieve(url, destfile)
 	
 #############################"Unzip tgz file
 	
 def unzipimage(tgzfile,outputdir):
     success=0
     if (os.path.exists(outputdir+'/'+tgzfile+'.tgz')):
-        print "\nunzipping..."
+        print ("\nunzipping...")
         try:
             if sys.platform.startswith('linux'):
                 subprocess.call('mkdir '+ outputdir+'/'+tgzfile, shell=True)   #Unix			
@@ -213,7 +224,7 @@ def unzipimage(tgzfile,outputdir):
                 subprocess.call('tartool '+outputdir+'/'+tgzfile+'.tgz '+ outputdir+'/'+tgzfile, shell=True)  #W32
             success=1
         except TypeError:
-            print 'Failed to unzip %s'%tgzfile
+            print ('Failed to unzip %s'%tgzfile)
         os.remove(outputdir+'/'+tgzfile+'.tgz')
     return success
 
@@ -241,14 +252,14 @@ def check_cloud_limit(imagepath,limit):
     cloudcover=read_cloudcover_in_metadata(imagepath)
     if cloudcover>limit:
         shutil.rmtree(imagepath)
-        print "Image was removed because the cloud cover value of " + str(cloudcover) + " exceeded the limit defined by the user!"	
+        print ("Image was removed because the cloud cover value of " + str(cloudcover) + " exceeded the limit defined by the user!")
         removed=1
     return removed		
 
 #############################"Find image with desired specs in usgs entire collection metadata
 
 def find_in_collection_metadata(collection_file,cc_limit,date_start,date_end,wr2path,wr2row):
-    print "Searching for images in catalog..."
+    print ("Searching for images in catalog...")
     cloudcoverlist = []
     cc_values = []	
     with open(collection_file) as csvfile:
@@ -285,14 +296,14 @@ def main():
     variable1='Teste'
     if len(sys.argv) == 1:
 	    prog = os.path.basename(sys.argv[0])
-	    print '      '+sys.argv[0]+' [options]'
-	    print "     Aide : ", prog, " --help"
-	    print "        ou : ", prog, " -h"
-	    print "example (scene): python %s -o scene -d 20151001 -f 20151231 -s 199030 -u usgs.txt"%sys.argv[0]
-	    print "example (scene): python %s -z unzip -b LT5 -o scene -d 20101001 -f 20101231 -s 203034 -u usgs.txt --output /outputdir/"%sys.argv[0]
-	    print "example (scene): python %s -z unzip -b LT5 -o scene -d 20101001 -f 20101231 -s 203034 -u usgs.txt --output /outputdir/ -k update --outputcatalogs /outputcatalogsdir/"%sys.argv[0]		
-	    print "example (scene): python %s -b LE7 -o scene -d 20151201 -f 20151231 -s 191025 -u usgs.txt --output . --dir=12267 --station SG1"%sys.argv[0]
-	    print "example (liste): python %s -o liste -l /home/hagolle/LANDSAT/liste_landsat8_site.txt -u usgs.txt"%sys.argv[0]	
+	    print ('      '+sys.argv[0]+' [options]')
+	    print ("     Aide : ", prog, " --help")
+	    print ("        ou : ", prog, " -h")
+	    print ("example (scene): python %s -o scene -d 20151001 -f 20151231 -s 199030 -u usgs.txt"%sys.argv[0])
+	    print ("example (scene): python %s -z unzip -b LT5 -o scene -d 20101001 -f 20101231 -s 203034 -u usgs.txt --output /outputdir/"%sys.argv[0])
+	    print ("example (scene): python %s -z unzip -b LT5 -o scene -d 20101001 -f 20101231 -s 203034 -u usgs.txt --output /outputdir/ -k update --outputcatalogs /outputcatalogsdir/"%sys.argv[0])
+	    print ("example (scene): python %s -b LE7 -o scene -d 20151201 -f 20151231 -s 191025 -u usgs.txt --output . --dir=12267 --station SG1"%sys.argv[0])
+	    print ("example (liste): python %s -o liste -l /home/hagolle/LANDSAT/liste_landsat8_site.txt -u usgs.txt"%sys.argv[0])
 	    sys.exit(-1)
     else:
         usage = "usage: %prog [options] "
@@ -322,14 +333,13 @@ def main():
         parser.add_option("--outputcatalogs", dest="outputcatalogs", action="store", type="string", \
 			    help="Where to download metadata catalog files",default='/tmp/LANDSAT')					
         parser.add_option("--dir", dest="dir", action="store", type="string", \
-			    help="Dir number where files  are stored at USGS",default=None)
+			    help="Dir number where files are stored at USGS",default=None)
         parser.add_option("--collection", dest="collection", action="store", type="int", \
 			    help="Landsat collection",default=1)
         parser.add_option("--station", dest="station", action="store", type="string", \
 			    help="Station acronym (3 letters) of the receiving station where the file is downloaded",default=None)	
         parser.add_option("-k", "--updatecatalogfiles", dest="updatecatalogfiles", action="store", type="choice", \
 			    help="Update catalog metadata files", choices=['update','noupdate'],default='noupdate')			
-
 
 
         (options, args) = parser.parse_args()
@@ -340,10 +350,10 @@ def main():
 	        parser.check_required("-u")
 	    
         elif options.option=='liste' :
-	        parser.check_required("-l")
-    	        parser.check_required("-u")
+            parser.check_required("-l")
+            parser.check_required("-u")
 
-    print options.station, options.dir
+    print ('Station = ', options.station, '\nDir number = ', options.dir)
     rep=options.output
     if not os.path.exists(rep):
         os.mkdir(rep)
@@ -353,17 +363,16 @@ def main():
  
     # read password files
     try:
-        f=file(options.usgs)
+        f=open(options.usgs)
         (account,passwd)=f.readline().split(' ')
         if passwd.endswith('\n'):
             passwd=passwd[:-1]
         usgs={'account':account,'passwd':passwd}
         f.close()
-    except :
-        print "error with usgs password file"
+    except:
+        print ("error with usgs password file")
         sys.exit(-2)
 
-			
 
     if options.proxy != None :
         try:
@@ -380,9 +389,8 @@ def main():
             proxy={'user':user,'pass':passwd,'host':host,'port':port}
             f.close()
         except :
-            print "error with proxy password file"
+            print ("error with proxy password file")
             sys.exit(-3)
-
 
 			
 ##########Telechargement des produits par scene
@@ -404,7 +412,7 @@ def main():
 	        day_end  =int(options.end_date[6:8])
 	        date_end =datetime.datetime(year_end,month_end, day_end)
         else:
-	    date_end=datetime.datetime.now()
+	        date_end=datetime.datetime.now()
 	
         if options.proxy!=None:
             connect_earthexplorer_proxy(proxy,usgs)
@@ -438,39 +446,39 @@ def main():
         while (curr_date < date_end) and check==1:
             date_asc=curr_date.strftime("%Y%j")
             notfound = False		
-            print 'Searching for images on (julian date): ' + date_asc + '...'
+            print ('Searching for images on (julian date): ' + date_asc + '...')
             curr_date=curr_date+datetime.timedelta(16)
             for station in stations:
-                for version in ['00','01','02']:			
-					nom_prod=produit+options.scene+date_asc+station+version
-					tgzfile=os.path.join(rep_scene,nom_prod+'.tgz')
-					lsdestdir=os.path.join(rep_scene,nom_prod)				
-					url="https://earthexplorer.usgs.gov/download/%s/%s/STANDARD/EE"%(repert,nom_prod)
-					print url
-					if os.path.exists(lsdestdir):
-						print '   product %s already downloaded and unzipped'%nom_prod
-						downloaded_ids.append(nom_prod)
-						check = 0						
-					elif os.path.isfile(tgzfile):
-						print '   product %s already downloaded'%nom_prod
-						if options.unzip!= None:
-							p=unzipimage(nom_prod,rep_scene)
-							if p==1 and options.clouds!= None:					
-								check=check_cloud_limit(lsdestdir,options.clouds)
-								if check==0:
-									downloaded_ids.append(nom_prod)							
-					else:
-						try:
-							downloadChunks(url,"%s"%rep_scene,nom_prod+'.tgz')
-						except:
-							print '   product %s not found'%nom_prod
-							notfound = True
-						if notfound != True and options.unzip!= None:
-							p=unzipimage(nom_prod,rep_scene)
-							if p==1 and options.clouds!= None:					
-								check=check_cloud_limit(lsdestdir,options.clouds)
-								if check==0:
-									downloaded_ids.append(nom_prod)								
+                for version in ['00','01','02']:
+                    nom_prod=produit+options.scene+date_asc+station+version
+                    tgzfile=os.path.join(rep_scene,nom_prod+'.tgz')
+                    lsdestdir=os.path.join(rep_scene,nom_prod)
+                    url="https://earthexplorer.usgs.gov/download/%s/%s/STANDARD/EE"%(repert,nom_prod)
+                    print (url)
+                    if os.path.exists(lsdestdir):
+                        print ('   product %s already downloaded and unzipped'%nom_prod)
+                        downloaded_ids.append(nom_prod)
+                        check = 0
+                    elif os.path.isfile(tgzfile):
+                        print ('   product %s already downloaded'%nom_prod)
+                        if options.unzip!= None:
+                            p=unzipimage(nom_prod,rep_scene)
+                            if p==1 and options.clouds!= None:
+                                check=check_cloud_limit(lsdestdir,options.clouds)
+                                if check==0:
+                                    downloaded_ids.append(nom_prod)
+                    else:
+                        try:
+                            downloadChunks(url,"%s"%rep_scene,nom_prod+'.tgz')
+                        except:
+                            print ('   product %s not found'%nom_prod)
+                            notfound = True
+                        if notfound != True and options.unzip!= None:
+                            p=unzipimage(nom_prod,rep_scene)
+                            if p==1 and options.clouds!= None:
+                                check=check_cloud_limit(lsdestdir,options.clouds)
+                                if check==0:
+                                    downloaded_ids.append(nom_prod)
         log(rep,downloaded_ids)
 
 ##########Telechargement des produits par catalog metadata search
@@ -516,7 +524,7 @@ def main():
             if 2000<=int(year_start)<=2009:
                 collection_file=os.path.join(options.outputcatalogs,'LANDSAT_TM-2000-2009.csv')
             if 2010<=int(year_start)<=2012:
-                collection_file=os.path.join(options.outputcatalogs,'LANDSAT_TM-2010-2012.csv')				
+                collection_file=os.path.join(options.outputcatalogs,'LANDSAT_TM-2010-2012.csv')
             
         check=1
 
@@ -530,11 +538,11 @@ def main():
             lsdestdir=os.path.join(rep_scene,nom_prod)
 
         if os.path.exists(lsdestdir):
-            print '   product %s already downloaded and unzipped'%nom_prod
+            print ('   product %s already downloaded and unzipped'%nom_prod)
             downloaded_ids.append(nom_prod)
             check = 0						
         elif os.path.isfile(tgzfile):
-            print '   product %s already downloaded'%nom_prod
+            print ('   product %s already downloaded'%nom_prod)
             if options.unzip!= None:
                 p=unzipimage(nom_prod,rep_scene)
                 if p==1:
@@ -547,7 +555,7 @@ def main():
                     try:
                         downloadChunks(url,"%s"%rep_scene,nom_prod+'.tgz')
                     except:
-                        print '   product %s not found'%nom_prod
+                        print ('   product %s not found'%nom_prod)
                         notfound = True
                     if notfound != True and options.unzip!= None:
                         p=unzipimage(nom_prod,rep_scene)
@@ -560,11 +568,11 @@ def main():
 ##########Telechargement par liste
     if options.option=='liste':
         with file(options.fic_liste) as f:
-	    lignes=f.readlines()
+            lignes=f.readlines()
         for ligne in lignes:
             (site,nom_prod)=ligne.split(' ')
             produit=nom_prod.strip()
-            print produit
+            print (produit)
             if produit.startswith('LC8'):
                 repert='12864'
                 stations=['LGN']
@@ -577,7 +585,7 @@ def main():
             if not os.path.exists(rep+'/'+site):
                 os.mkdir(rep+'/'+site)
             url="https://earthexplorer.usgs.gov/download/%s/%s/STANDARD/EE"%(repert,produit)
-            print 'url=',url
+            print ('url=',url)
             try:
                 if options.proxy!=None :
                     connect_earthexplorer_proxy(proxy,usgs)
@@ -586,7 +594,7 @@ def main():
 
                 downloadChunks(url,rep+'/'+site,produit+'.tgz')
             except TypeError:
-                print 'produit %s non trouve'%produit
+                print ('produit %s non trouve'%produit)
 
 if __name__ == "__main__":
     main()
