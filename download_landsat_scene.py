@@ -6,7 +6,7 @@
 """
 
 import os, sys, math, urllib.request, urllib.parse, time, math, shutil
-import subprocess
+import subprocess, urllib.error
 import optparse
 import datetime
 import csv
